@@ -30,17 +30,21 @@ def ts(sec: float) -> str:
 
 def main() -> None:
     OUT.mkdir(exist_ok=True)
-    video = (
-        f"color=c=0x101826:s=1920x1080:r=30:d={DURATION},format=yuv420p,"
-        "drawbox=x='mod(t*240,1920)':y=420:w=220:h=220:color=0x3b82f6@0.9:t=fill,"
-        "drawbox=x='1700-mod(t*180,1700)':y=180:w=160:h=160:color=0x14b8a6@0.9:t=fill"
-    )
+    bg = (f"color=c=0x101826:s=1920x1080:r=30:d={DURATION},format=yuv420p,"
+          "drawbox=x=1660:y=420:w=220:h=220:color=0x3b82f6@0.9:t=fill,"
+          "drawbox=x=300:y=380:w=160:h=160:color=0x14b8a6@0.9:t=fill")
+    # testsrc: ffmpeg's built-in pattern with a moving element and a frame counter, drawn without freetype, so every
+    # frame differs on every ffmpeg build. Kept in the upper area, away from the caption band.
+    pattern = f"testsrc=size=480x270:rate=30:duration={DURATION}"
+    graph = "[0:v][1:v]overlay=1060:60"
     if has_filter("drawtext") and default_font():  # Homebrew ffmpeg on macOS has no drawtext
-        video += (f",drawtext=fontfile='{esc(default_font())}':text='SYNTHETIC DEMO  %{{pts\\:hms}}':"
-                  "x=(w-text_w)/2:y=60:fontsize=72:fontcolor=0xe5e7eb")
+        graph += (f",drawtext=fontfile='{esc(default_font())}':text='SYNTHETIC DEMO  %{{pts\\:hms}}':"
+                  "x=80:y=60:fontsize=56:fontcolor=0xe5e7eb")
+    graph += "[v]"
     audio = f"sine=frequency=330:sample_rate=48000:duration={DURATION},volume=0.035"
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                    "-f", "lavfi", "-i", video, "-f", "lavfi", "-i", audio,
+                    "-f", "lavfi", "-i", bg, "-f", "lavfi", "-i", pattern, "-f", "lavfi", "-i", audio,
+                    "-filter_complex", graph, "-map", "[v]", "-map", "2:a",
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "128k",
                     "-shortest", str(OUT / "source_16x9.mp4")], check=True)
 

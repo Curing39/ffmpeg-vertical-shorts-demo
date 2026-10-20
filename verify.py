@@ -112,7 +112,7 @@ def main(out_dir: str, sample_dir: str) -> int:
         diffs = {k: float(np.abs(first - frame(src, (n0 + k - 0.5) * frame_s, vf).astype(np.int16))[:CAP_TOP].mean())
                  for k in (-1, 0, 1)}
         check(f"{name}: first frame = source frame at start (frame-accurate)", min(diffs, key=diffs.get) == 0,
-              ", ".join(f"{k:+d}f:{d:.2f}" for k, d in diffs.items()))
+              ", ".join(f"{k:+d}f:{d:.4f}" for k, d in diffs.items()))
         check(f"{name}: contact sheet exists", (out / f"{name}_contact.jpg").stat().st_size > 10_000)
 
     passed = all(ok for _, ok, _ in results)
