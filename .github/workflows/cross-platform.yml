@@ -1,0 +1,66 @@
+# Runs the full demo + automated verification on real GitHub-hosted runners, including macOS on Apple Silicon.
+# macos-15 standard runners are arm64 (Apple Silicon); free for public repositories. Results are uploaded as artifacts (verification.md, report.json,
+# contact sheets) so the macOS evidence can be inspected, not just claimed.
+name: cross-platform verification
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg (Homebrew on macOS, as the target environment)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Environment
+        shell: bash
+        run: |
+          uname -a || true
+          python --version
+          ffmpeg -hide_banner -version | head -n 1
+          ffmpeg -hide_banner -filters | grep -E " (ass|subtitles|loudnorm|ebur128|tile|gblur) " || true
+
+      - run: python -m pip install numpy pillow
+
+      - name: Build synthetic sample
+        run: python make_sample.py
+
+      - name: Render (fill + crop)
+        shell: bash
+        run: |
+          python shorts.py --input sample/source_16x9.mp4 --clips sample/clips.json --srt sample/captions.srt --framing fill --out out/fill
+          python shorts.py --input sample/source_16x9.mp4 --clips sample/clips.json --srt sample/captions.srt --framing crop --offset 0.5 --out out/crop
+
+      - name: Verify
+        shell: bash
+        run: |
+          python verify.py out/fill sample
+          python verify.py out/crop sample
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-${{ matrix.os }}
+          path: |
+            out/*/verification.md
+            out/*/report.json
+            out/*/*_contact.jpg
