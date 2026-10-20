@@ -29,9 +29,9 @@ A small command-line tool that cuts a long 16:9 video into vertical 1080x1920 cl
 | Platform | Result | Evidence |
 | --- | --- | --- |
 | Windows 11 x64, ffmpeg 2026-05 essentials build, Python 3.12 | **23/23 PASS (fill), 23/23 PASS (crop)** | local run 2026-10-20 (`out/` is not committed; rerun the commands below to reproduce) |
-| macOS 15 Apple Silicon (GitHub Actions `macos-15`, Homebrew ffmpeg) | Pending first CI run | Actions tab, artifact `evidence-macos-15` |
-| Windows (GitHub Actions `windows-latest`) | Pending first CI run | Actions tab |
-| Ubuntu (GitHub Actions `ubuntu-latest`) | Pending first CI run | Actions tab |
+| macOS 15 Apple Silicon (GitHub Actions `macos-15`, Homebrew ffmpeg 9.0.1, Python 3.11) | **23/23 PASS** for fill, crop and image captions (captions drawn with Pillow; this ffmpeg has no libass) | [run 39432722966](https://github.com/Curing39/ffmpeg-vertical-shorts-demo/actions/runs/39432722966), artifact `evidence-macos-15` |
+| Windows (GitHub Actions `windows-latest`) | PASS (all three configurations) | [same run](https://github.com/Curing39/ffmpeg-vertical-shorts-demo/actions/runs/39432722966) |
+| Ubuntu (GitHub Actions `ubuntu-latest`) | PASS (all three configurations) | [same run](https://github.com/Curing39/ffmpeg-vertical-shorts-demo/actions/runs/39432722966) |
 
 No platform is claimed as tested until its row says PASS with evidence.
 
