@@ -165,16 +165,45 @@ def caption_filter(srt: Path, font: str | None, size: int, ypos: float, use_liba
         write_ass(cues, ass, (font_family(font) if font else None) or "Arial", size, ypos)
         fontsdir = f":fontsdir='{esc(str(Path(font).parent))}'" if font else ""
         return f"ass='{esc(str(ass))}'{fontsdir}"
-    # Fallback for ffmpeg builds without libass: one drawtext per cue, same look.
+    raise AssertionError("image captions are handled by caption_images()")
+
+
+def wrap(draw, text: str, font, max_w: int) -> list[str]:
+    lines = []
+    for para in text.split("\n"):
+        line = ""
+        for word in para.split():
+            trial = f"{line} {word}".strip()
+            if draw.textlength(trial, font=font) <= max_w or not line:
+                line = trial
+            else:
+                lines.append(line)
+                line = word
+        lines.append(line)
+    return lines
+
+
+def caption_images(cues: list[Cue], font: str | None, size: int, ypos: float, tmp: Path, name: str) -> list[Path]:
+    """Captions as transparent 1080x1920 PNGs (white text, black outline), for ffmpeg builds without libass or
+    freetype - e.g. Homebrew ffmpeg on macOS. They are composited with the built-in overlay filter."""
+    from PIL import Image, ImageDraw, ImageFont
     if not font:
-        raise ClipError("no libass in this ffmpeg and no --font given for the drawtext fallback")
-    parts = []
-    for c in cues:
-        text = c.text.replace("\\", "\\\\").replace("'", "\u2019").replace(":", "\\:").replace("%", "\\%")
-        parts.append(f"drawtext=fontfile='{esc(font)}':text='{text}':fontsize={size}:fontcolor=white:"
-                     f"borderw=5:bordercolor=black:x=(w-text_w)/2:y=h*{ypos:.3f}-text_h:"
-                     f"enable='between(t,{c.start:.3f},{c.end:.3f})'")
-    return ",".join(parts) if parts else "null"
+        raise ClipError("this ffmpeg has no libass: pass --font so captions can be drawn as images")
+    f = ImageFont.truetype(font, size)
+    paths = []
+    for i, c in enumerate(cues):
+        img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        lines = wrap(d, c.text, f, W - 120)
+        line_h = int(size * 1.2)
+        y = int(H * ypos) - line_h * len(lines)
+        for ln in lines:
+            d.text((W / 2, y), ln, font=f, fill="white", anchor="ma", stroke_width=5, stroke_fill="black")
+            y += line_h
+        p = tmp / f"{name}_cap{i:03d}.png"
+        img.save(p)
+        paths.append(p)
+    return paths
 
 
 def loudnorm_measure(src: Path, start: float, dur: float, lufs: float) -> dict:
@@ -215,18 +244,27 @@ def render_clip(args, src_info: dict, clip: dict, cues: list[Cue], use_libass: b
     dur = end - start
     vf = framing_filter(args.framing, args.offset)
     retimed = retime(cues, start, end) if cues else []
+    images: list[Path] = []
     if args.srt:
         clip_srt = tmp / f"{name}.srt"
         write_srt(retimed, clip_srt)
-        if retimed:
+        if retimed and use_libass:
             vf += "," + caption_filter(clip_srt, font, args.font_size, args.caption_y, use_libass, retimed)
+        elif retimed:
+            images = caption_images(retimed, font, args.font_size, args.caption_y, tmp, name)
+    graph = f"[0:v]{vf}[v0]"
+    for i, (c, _) in enumerate(zip(retimed, images)):
+        graph += (f";[v{i}][{i + 1}:v]overlay=0:0:enable='between(t,{c.start:.3f},{c.end:.3f})'"
+                  f":eof_action=pass[v{i + 1}]")
+    vout = f"[v{len(images)}]"
     m = loudnorm_measure(args.input, start, dur, args.lufs)
     af = (f"loudnorm=I={args.lufs}:TP=-1.5:LRA=11:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
           f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}:"
           f"linear=true,aresample=48000")
     out = args.out / f"{name}.mp4"
+    img_inputs = [x for p in images for x in ("-loop", "1", "-t", f"{dur:.3f}", "-i", str(p))]
     run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(args.input),
-         "-t", f"{dur:.3f}", "-filter_complex", f"[0:v]{vf}[v];[0:a]{af}[a]", "-map", "[v]", "-map", "[a]",
+         *img_inputs, "-t", f"{dur:.3f}", "-filter_complex", f"{graph};[0:a]{af}[a]", "-map", vout, "-map", "[a]",
          "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
          "-fps_mode", "passthrough", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(out)])
     contact_sheet(out, dur, args.out / f"{name}_contact.jpg")
@@ -245,6 +283,8 @@ def main(argv=None) -> int:
     p.add_argument("--font-size", type=int, default=64)
     p.add_argument("--caption-y", type=float, default=0.78, help="caption baseline as a fraction of height")
     p.add_argument("--lufs", type=float, default=-14.0)
+    p.add_argument("--caption-renderer", choices=["auto", "libass", "image"], default="auto",
+                   help="auto = libass when this ffmpeg has it, otherwise PNG overlays drawn with Pillow")
     p.add_argument("--out", type=Path, default=Path("out"))
     args = p.parse_args(argv)
 
@@ -263,7 +303,9 @@ def main(argv=None) -> int:
     src = {"duration": float(info["format"]["duration"]), "fps": v["r_frame_rate"]}
     cues = read_srt(args.srt) if args.srt else []
     font = args.font or default_font()
-    use_libass = has_filter("subtitles")
+    use_libass = args.caption_renderer != "image" and has_filter("ass")
+    if args.caption_renderer == "libass" and not use_libass:
+        sys.exit("error: this ffmpeg has no libass (ass filter); use --caption-renderer image")
     clips = json.loads(args.clips.read_text(encoding="utf-8"))["clips"]
 
     results = []
@@ -277,7 +319,7 @@ def main(argv=None) -> int:
                 print(f"[skip] {clip.get('name')}: {e}")
             results.append(r)
     report = {"input": args.input.name, "source_fps": src["fps"], "framing": args.framing,
-              "caption_renderer": "libass" if use_libass else "drawtext", "lufs_target": args.lufs,
+              "caption_renderer": "libass" if use_libass else "pillow-overlay", "lufs_target": args.lufs,
               "platform": f"{platform.system()} {platform.machine()}", "clips": results}
     (args.out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     ok = sum(r["status"] == "ok" for r in results)

@@ -37,7 +37,7 @@ jobs:
           uname -a || true
           python --version
           ffmpeg -hide_banner -version | head -n 1
-          ffmpeg -hide_banner -filters | grep -E " (ass|subtitles|loudnorm|ebur128|tile|gblur) " || true
+          ffmpeg -hide_banner -filters | grep -E " (ass|subtitles|drawtext|overlay|loudnorm|ebur128|tile|gblur) " || true
 
       - run: python -m pip install numpy pillow
 
@@ -49,12 +49,15 @@ jobs:
         run: |
           python shorts.py --input sample/source_16x9.mp4 --clips sample/clips.json --srt sample/captions.srt --framing fill --out out/fill
           python shorts.py --input sample/source_16x9.mp4 --clips sample/clips.json --srt sample/captions.srt --framing crop --offset 0.5 --out out/crop
+          python shorts.py --input sample/source_16x9.mp4 --clips sample/clips.json --srt sample/captions.srt --framing fill --caption-renderer image --out out/image
 
       - name: Verify
         shell: bash
         run: |
           python verify.py out/fill sample
           python verify.py out/crop sample
+          python verify.py out/image sample
+          cat out/*/report.json | grep -E 'caption_renderer|platform'
 
       - uses: actions/upload-artifact@v4
         if: always()

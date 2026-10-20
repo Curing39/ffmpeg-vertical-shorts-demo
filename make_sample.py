@@ -13,7 +13,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from shorts import default_font, esc
+from shorts import default_font, esc, has_filter
 
 HERE = Path(__file__).parent
 OUT = HERE / "sample"
@@ -33,10 +33,11 @@ def main() -> None:
     video = (
         f"color=c=0x101826:s=1920x1080:r=30:d={DURATION},format=yuv420p,"
         "drawbox=x='mod(t*240,1920)':y=420:w=220:h=220:color=0x3b82f6@0.9:t=fill,"
-        "drawbox=x='1700-mod(t*180,1700)':y=180:w=160:h=160:color=0x14b8a6@0.9:t=fill,"
-        f"drawtext=fontfile='{esc(default_font())}':text='SYNTHETIC DEMO  %{{pts\\:hms}}':"
-        "x=(w-text_w)/2:y=60:fontsize=72:fontcolor=0xe5e7eb"
+        "drawbox=x='1700-mod(t*180,1700)':y=180:w=160:h=160:color=0x14b8a6@0.9:t=fill"
     )
+    if has_filter("drawtext") and default_font():  # Homebrew ffmpeg on macOS has no drawtext
+        video += (f",drawtext=fontfile='{esc(default_font())}':text='SYNTHETIC DEMO  %{{pts\\:hms}}':"
+                  "x=(w-text_w)/2:y=60:fontsize=72:fontcolor=0xe5e7eb")
     audio = f"sine=frequency=330:sample_rate=48000:duration={DURATION},volume=0.035"
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                     "-f", "lavfi", "-i", video, "-f", "lavfi", "-i", audio,
